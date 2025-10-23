@@ -112,7 +112,7 @@ This ensures **every timestep “attends” to speaker & emotion context**, unli
 - Freeze Whisper, emotion, speaker, and LLM weights.
 - Train only cross-attention + projection MLP.
 - Losses:
-  L = λ_emo _ L_emo + λ_align _ L_contrast
+  L = λ*emo * L*emo + λ_align * L_contrast
   - L_emo: predict emotion label from fused embedding
   - L_contrast: contrastive alignment between fused and LLM hidden states
 
@@ -128,7 +128,7 @@ Optional: add **spec-augment** and **audio mixup** for robustness.
 
 ---
 
-## 6. Evaluation
+## 6. Evaluation (can be changed)
 
 ### 6.1 Automated
 
@@ -202,6 +202,5 @@ print(text[0]["generated_text"])
 | LLM        | Mistral or Phi-3       | Configurable small/large             |
 | Dataset    | Multi-emotion mix      | Same + dialogue-context              |
 | Evaluation | Text + emotion metrics | Unified automatic + human + ablation |
-| Ethics     | Gender embeddings      | Continuous, non-categorical          |
 
 ---
