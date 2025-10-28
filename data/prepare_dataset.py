@@ -1,6 +1,7 @@
 import os
 import json
 import re
+from networkx import display
 import torch
 from glob import glob
 from tqdm import tqdm
@@ -8,6 +9,8 @@ from speechbrain.inference import EncoderClassifier
 import sys
 from openai import OpenAI
 from dotenv import load_dotenv
+import numpy as np
+import pandas as pd
 
 load_dotenv()
 
@@ -15,6 +18,7 @@ repo_source = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
 local_module = os.path.abspath("custom_interface.py")
 sys.path.append(os.path.dirname(local_module))
 from custom_interface import CustomEncoderWav2vec2Classifier
+from utils import clean_text
 
 
 EMO_MAP = {
@@ -29,7 +33,7 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-print("🔧 Loading models...")
+print("Loading models...")
 spk_model = EncoderClassifier.from_hparams(
     source="speechbrain/spkrec-ecapa-voxceleb",
     run_opts={"device": device},
@@ -200,12 +204,6 @@ def prepare_crema(data_dir="data/raw/crema-d", output_jsonl="cremad_emb.jsonl"):
     print(f"Saved {len(entries)} CREMA-D entries → {output_jsonl}")
 
 
-import os
-import re
-import json
-from glob import glob
-from tqdm import tqdm
-
 # --- Canonical emotion mapping (IEMOCAP → simplified 4 labels)
 EMO_MAP = {
     "hap": "happy",
@@ -341,10 +339,71 @@ def prepare_iemocap(
     print(f"\n✅ Saved {len(entries)} utterances → {output_jsonl}")
 
 
+def prepare_meld():
+    output_jsonl = "meld.jsonl"
+    path = os.path.join("data/raw/meld/train")
+    csv_dir = os.path.join(path, "train_sent_emo.csv")
+    data_dir = os.path.join(path, "train_splits")
+
+    df = pd.read_csv(csv_dir)
+    df = df[["Dialogue_ID", "Utterance_ID", "Utterance", "Emotion"]]
+    df["Utterance"] = df["Utterance"].apply(clean_text)
+
+    processed_ids = set()
+    if os.path.exists(output_jsonl):
+        with open(output_jsonl, "r") as f:
+            for line in f:
+                try:
+                    sample = json.loads(line)
+
+                    key = os.path.basename(sample["audio_path"])
+                    processed_ids.add(key)
+                except json.JSONDecodeError:
+                    continue
+        print(
+            f"Resuming from checkpoint: {len(processed_ids)} samples already processed."
+        )
+
+    with open(output_jsonl, "a") as f_out:
+        for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing MELD"):
+            audio_filename = f"dia{row['Dialogue_ID']}_utt{row['Utterance_ID']}.wav"
+            audio_path = os.path.join(data_dir, audio_filename)
+
+            if audio_filename in processed_ids:
+                continue
+
+            if not os.path.exists(audio_path):
+                print(f"Missing file: {audio_path}")
+                continue
+
+            try:
+                combined_emb, emo_pred = get_embeddings(audio_path)
+            except Exception as e:
+                print(f"Skipping {audio_filename} ({e})")
+                continue
+
+            assistant_reply = generate_assistant_reply(row["Utterance"], emo_pred)
+
+            sample = {
+                "audio_path": audio_path,
+                "transcript": row["Utterance"],
+                "emotion_label": emo_pred,
+                "combined_embedding": combined_emb,
+                "assistant_reply": assistant_reply,
+                "context": [],
+            }
+            json.dump(sample, f_out)
+            f_out.write("\n")
+            f_out.flush()
+
+    print("✅ MELD preparation complete (checkpoint-safe).")
+
+
 # --------------------------------------------------------
 # 5. Main
 # --------------------------------------------------------
 if __name__ == "__main__":
     # prepare_ravd()
     # prepare_crema()
-    prepare_iemocap()
+    # prepare_iemocap()
+    prepare_meld()

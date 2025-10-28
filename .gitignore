@@ -74,3 +74,6 @@ logs/
 hf_token.txt
 
 .mypycache/
+
+wav2vec2_checkpoints/
+pretrained_models/
