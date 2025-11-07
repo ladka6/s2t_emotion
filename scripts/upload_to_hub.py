@@ -6,9 +6,8 @@ This script uploads JSONL files containing audio embeddings and metadata.
 import os
 import argparse
 from datasets import Dataset, DatasetDict, Features, Value, Sequence
-from huggingface_hub import HfApi, login
+from huggingface_hub import login
 import json
-from pathlib import Path
 
 
 def load_jsonl(file_path):
@@ -20,16 +19,18 @@ def load_jsonl(file_path):
     return data
 
 
-def create_dataset_from_jsonl(ravdess_path, cremad_path, iemocap_path):
+def create_dataset_from_jsonl(ravdess_path, cremad_path, iemocap_path, meld_path):
     """Create a Hugging Face dataset from JSONL files."""
     print("Loading JSONL files...")
     ravdess_data = load_jsonl(ravdess_path)
     cremad_data = load_jsonl(cremad_path)
     iemocap_data = load_jsonl(iemocap_path)
+    meld_data = load_jsonl(meld_path)
 
     print(f"   RAVDESS: {len(ravdess_data)} samples")
     print(f"   CREMA-D: {len(cremad_data)} samples")
     print(f"   IEMOCAP: {len(iemocap_data)} samples")
+    print(f"   MELD: {len(meld_data)} samples")
 
     # Combine datasets and add source labels
     all_data = []
@@ -43,6 +44,10 @@ def create_dataset_from_jsonl(ravdess_path, cremad_path, iemocap_path):
 
     for item in iemocap_data:
         item["dataset_source"] = "IEMOCAP"
+        all_data.append(item)
+
+    for item in meld_data:
+        item["dataset_source"] = "MELD"
         all_data.append(item)
 
     print(f"   Total: {len(all_data)} samples")
@@ -272,6 +277,12 @@ def main():
         help="Path to IEMOCAP JSONL file",
     )
     parser.add_argument(
+        "--meld",
+        type=str,
+        default="data/processed/meld.jsonl",
+        help="Path to MELD JSONL file",
+    )
+    parser.add_argument(
         "--repo-name",
         type=str,
         required=True,
@@ -302,7 +313,9 @@ def main():
         return
 
     # Create dataset
-    dataset_dict = create_dataset_from_jsonl(args.ravdess, args.cremad, args.iemocap)
+    dataset_dict = create_dataset_from_jsonl(
+        args.ravdess, args.cremad, args.iemocap, args.meld
+    )
 
     # Create README if requested
     if args.create_readme:
