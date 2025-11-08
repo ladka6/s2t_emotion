@@ -3,19 +3,28 @@
 # All functions should be pure and operate on/return numpy float32 arrays.
 
 import numpy as np
+import torchaudio
 
 
 def load_audio(path, target_sr=16000, mono=True):
-    """
-    Steps to implement:
-    1) Read audio from `path` (e.g., via soundfile or torchaudio).
-       - Retrieve waveform and original sample rate (sr).
-    2) If stereo and `mono=True`, downmix to mono (mean across channels).
-    3) Resample to `target_sr` if needed.
-    4) Ensure dtype=float32 and values in roughly [-1, 1].
-    5) Return 1D np.ndarray (float32) and (optionally) the final sr (you can keep sr implicit if always 16k).
-    """
-    pass
+    wav, sr = torchaudio.load(path)
+
+    if mono and wav.size(0) > 1:
+        wav = wav.mean(dim=0, keepdim=True)
+
+    if sr != target_sr:
+        wav = torchaudio.functional.resample(wav, sr, target_sr)
+        sr = target_sr
+
+    wav = wav.squeeze(0)
+
+    wav = wav.detach().cpu().numpy().astype(np.float32)
+
+    max_abs = np.max(np.abs(wav)) + 1e-9
+    if max_abs > 1.0:
+        wav = wav / max_abs
+
+    return wav
 
 
 def trim_silence(wav, top_db=30, frame_length=2048, hop_length=512):
@@ -30,26 +39,48 @@ def trim_silence(wav, top_db=30, frame_length=2048, hop_length=512):
 
 def rms_normalize(wav, target_dbfs=-23.0, eps=1e-9, peak_cap=0.99):
     """
-    Steps to implement:
-    1) Compute RMS in linear scale: rms = sqrt(mean(wav^2) + eps).
-    2) Convert to dBFS if you prefer (optional), or compute scale factor directly to match target RMS.
-    3) Multiply waveform by scale factor.
-    4) If max(|wav|) > peak_cap, scale down to clip at `peak_cap`.
-    5) Return normalized waveform (float32).
+    RMS-normalize an audio waveform to the target dBFS level.
+    wav: 1D np.ndarray float32 in [-1, 1]
+    target_dbfs: desired loudness (dB full-scale), typical speech ≈ -23 dBFS
+    peak_cap: optional safety clamp to avoid clipping.
     """
-    pass
+
+    rms = np.sqrt(np.mean(wav**2) + eps)
+
+    if rms < eps:
+        return wav.astype(np.float32)
+
+    target_rms = 10 ** (target_dbfs / 20.0)
+
+    scale = target_rms / rms
+
+    wav = wav * scale
+
+    max_abs = np.max(np.abs(wav)) + eps
+    if max_abs > peak_cap:
+        wav = wav * (peak_cap / max_abs)
+
+    return wav.astype(np.float32)
 
 
 def chunk_or_pad(wav, max_seconds=30.0, sr=16000, strategy="center", pad_value=0.0):
-    """
-    Steps to implement:
-    1) Compute max_len = int(max_seconds * sr).
-    2) If len(wav) == max_len: return as-is.
-    3) If len(wav) > max_len:
-       - strategy="center": take a centered slice.
-       - strategy="front": take the first max_len samples.
-       - strategy="random": random start index (for training augmentation).
-    4) If len(wav) < max_len: right-pad (or symmetric pad) with pad_value to exactly max_len.
-    5) Return shape == (max_len,) float32.
-    """
-    pass
+    wav = wav.astype(np.float32, copy=False)
+    max_len = int(max_seconds * sr)
+
+    if len(wav) == max_len:
+        return wav
+
+    if len(wav) > max_len:
+        if strategy == "center":
+            start = (len(wav) - max_len) // 2
+        elif strategy == "front":
+            start = 0
+        elif strategy == "random":
+            start = np.random.randint(0, len(wav) - max_len + 1)
+        else:
+            raise ValueError(f"Unknown strategy: {strategy}")
+
+        return wav[start : start + max_len]
+
+    pad_width = max_len - len(wav)
+    return np.pad(wav, (0, pad_width), mode="constant", constant_values=pad_value)
